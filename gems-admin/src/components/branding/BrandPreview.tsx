@@ -17,7 +17,7 @@ const NAV_ITEMS = [
 export function BrandPreview({ orgName, primaryColor, logoPreviewUrl }: Props) {
   return (
     <div className="rounded-lg border overflow-hidden shadow-sm text-xs select-none">
-      {/* mini topbar */}
+      
       <div className="h-7 flex items-center px-3 gap-2 border-b" style={{ backgroundColor: primaryColor }}>
         <div className="size-2.5 rounded-full bg-white/40" />
         <div className="size-2.5 rounded-full bg-white/40" />
