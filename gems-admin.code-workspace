@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "gems-backend"
+		},
+		{
+			"path": "gems-mobile"
 		}
 	]
 }

@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "GEMS Warehouse",
+    "slug": "gems-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a2942"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "GEMS Warehouse needs camera access to scan barcodes and Data Matrix codes."
+      },
+      "bundleIdentifier": "com.gems.warehouse"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1a2942"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.gems.warehouse"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow GEMS Warehouse to access your camera to scan barcodes and Data Matrix codes."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "cde49365-5012-481e-88b1-51621c1bf1bd"
+      }
+    }
+  }
+}

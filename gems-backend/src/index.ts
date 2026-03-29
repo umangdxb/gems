@@ -7,6 +7,7 @@ import authRoutes from './routes/authRoutes'
 import tenantRoutes from './routes/tenantRoutes'
 import tenantsRoutes from './routes/tenantsRoutes'
 import orderRoutes from './routes/orderRoutes'
+import deliveryOrderRoutes from './routes/deliveryOrderRoutes'
 import userRoutes from './routes/userRoutes'
 
 const app = express()
@@ -28,6 +29,7 @@ app.use('/auth', authRoutes)
 app.use('/tenant', tenantRoutes)
 app.use('/tenants', tenantsRoutes)
 app.use('/orders', orderRoutes)
+app.use('/delivery-orders', deliveryOrderRoutes)
 app.use('/users', userRoutes)
 
 app.get('/', (_req, res) => {

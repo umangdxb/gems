@@ -9,6 +9,7 @@ import { LoginPage } from '@/pages/auth/LoginPage'
 import { SignupPage } from '@/pages/auth/SignupPage'
 import { DashboardPage } from '@/pages/dashboard/DashboardPage'
 import { IntegrationPage } from '@/pages/integration/IntegrationPage'
+import { OrdersPage } from '@/pages/orders/OrdersPage'
 import { UsersPage } from '@/pages/users/UsersPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 
@@ -26,6 +27,7 @@ function ProtectedRoutes() {
           element={isAdmin ? <UsersPage /> : <Navigate to="/dashboard" replace />}
         />
         <Route path="/integration" element={<IntegrationPage />} />
+        <Route path="/orders" element={<OrdersPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

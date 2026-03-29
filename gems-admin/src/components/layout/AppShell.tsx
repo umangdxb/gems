@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   Users,
   ArrowLeftRight,
+  ClipboardList,
   Settings,
   LogOut,
 } from 'lucide-react'
@@ -27,6 +28,7 @@ const navItems = [
   { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, adminOnly: false },
   { label: 'Users', to: '/users', icon: Users, adminOnly: true },
   { label: 'Integration', to: '/integration', icon: ArrowLeftRight, adminOnly: false },
+  { label: 'Orders', to: '/orders', icon: ClipboardList, adminOnly: false },
   { label: 'Settings', to: '/settings', icon: Settings, adminOnly: false },
 ]
 
