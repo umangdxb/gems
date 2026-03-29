@@ -1,0 +1,59 @@
+<ns0:EPCISDocument creationDate="2020-03-27T10:04:27.868Z" schemaVersion="1.2" xmlns:ns0="urn:epcglobal:epcis:xsd:1">
+	<EPCISHeader>
+		<StandardBusinessDocumentHeader>
+			<HeaderVersion>1.2</HeaderVersion>
+			<Sender>
+				<Identifier Authority="GS1">6161021000524</Identifier>
+			</Sender>
+			<Receiver>
+				<Identifier Authority="GS1">5000219009912</Identifier>
+			</Receiver>
+			<DocumentIdentification>
+				<Standard>GS1</Standard>
+				<TypeVersion>3.0</TypeVersion>
+				<InstanceIdentifier>6161021.00000.RE04200327B73373F</InstanceIdentifier>
+				<Type>Events</Type>
+				<MultipleType>true</MultipleType>
+				<CreationDateAndTime>2020-03-27T10:04:27.868Z</CreationDateAndTime>
+			</DocumentIdentification>
+		</StandardBusinessDocumentHeader>
+	</EPCISHeader>
+	<EPCISBody>
+		<EventList>
+			<ObjectEvent>
+				<eventTime>2020-03-27T10:04:25.000Z</eventTime>
+				<eventTimeZoneOffset>+04:00</eventTimeZoneOffset>
+				<epcList>
+					<epc>QCBDRa1AaHi5AqB000000423842811cbAC020012810</epc>
+					<epc>QCBDRa1AaCLHNfB000000423842811cbAC020012810</epc>
+					<epc>QCBDRa1AaSD8L4f000000423842811cbAC020012810</epc>
+					<epc>QCBDRa1AannisBC000000423842811cbAC020012810</epc>
+					<epc>QCBDRa1AawfnxLV000000423842811cbAC020012810</epc>
+					<epc>QCBDRa1AavqwUpq000000423842811cbAC020012810</epc>
+					<epc>QCBDRa1AamL4qyu000000423842811cbAC020012810</epc>
+					<epc>QCBDRa1AaZEvgNp000000423842811cbAC020012810</epc>
+					<epc>QCBDRa1AagdujKC000000423842811cbAC020012810</epc>
+					<epc>QCBDRa1AaMMGBf4000000423842811cbAC020012810</epc>
+				</epcList>
+				<action>OBSERVE</action>
+				<bizStep>urn:epcglobal:cbv:bizstep:picking</bizStep>
+				<disposition>urn:epcglobal:cbv:disp:in_progress</disposition>
+				<readPoint>
+					<id>urn:epc:id:sgln:6161021.00052.PC</id>
+				</readPoint>
+				<bizTransactionList>
+					<bizTransaction type="urn:epcglobal:cbv:btt:desadv">urn:epcglobal:cbv:bt:5000219010093:9100021724</bizTransaction>
+				</bizTransactionList>
+				<extension>
+					<sourceList>
+						<source type="urn:epcglobal:cbv:sdt:owning_party">urn:epc:id:sgln:6161021.00052.0</source>
+					</sourceList>
+					<destinationList>
+						<destination type="urn:epcglobal:cbv:sdt:location">http://epcis.dcta-global.com/ns/loc/51597267/</destination>
+						<destination type="urn:epcglobal:cbv:sdt:owning_party">http://epcis.dcta-global.com/ns/loc/51597267/</destination>
+					</destinationList>
+				</extension>
+			</ObjectEvent>
+		</EventList>
+	</EPCISBody>
+</ns0:EPCISDocument>

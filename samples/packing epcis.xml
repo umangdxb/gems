@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<epcis:EPCISDocument creationDate="2021-12-08T12:42:36Z" schemaVersion="1.1" xmlns:epcis="urn:epcglobal:epcis:xsd:1" xmlns:gs1ushc="http://epcis.gs1us.org/hc/ns" xmlns:sbdh="http://www.unece.org/cefact/namespaces/StandardBusinessDocumentHeader">
+	<EPCISHeader>
+		<SAPHeaderExtension>
+			<SAPQueueMessageSender>ESSERS</SAPQueueMessageSender>
+		</SAPHeaderExtension>
+	</EPCISHeader>
+	<EPCISBody>
+		<EventList>
+			<AggregationEvent>
+				<eventTime>2021-12-08T12:43:36Z</eventTime>
+				<eventTimeZoneOffset>+01:00</eventTimeZoneOffset>
+				<parentID>urn:epc:id:sscc:5413787.3100112527</parentID>
+				<childEPCs>
+					<epc>urn:epc:id:sgtin:5413787.000845.10004R28XV0BQT</epc>
+					<epc>urn:epc:id:sgtin:5413787.000845.10005K5CKHJCFX</epc>
+					<epc>urn:epc:id:sgtin:5413787.000845.100061LKKKW3KW</epc>
+					<epc>urn:epc:id:sgtin:5413787.000845.100080B9T22W0W</epc>
+					<epc>urn:epc:id:sgtin:5413787.000845.1000FVP80N18Q0</epc>
+					<epc>urn:epc:id:sgtin:5413787.000845.1000HHSSGFPSVD</epc>
+					<epc>urn:epc:id:sgtin:5413787.000845.1000LN2STRUKGX</epc>
+					<epc>urn:epc:id:sgtin:5413787.000845.1000NUEA597LH2</epc>
+					<epc>urn:epc:id:sgtin:5413787.000845.1000X9NAWDQBTW</epc>
+					<epc>urn:epc:id:sgtin:5413787.000845.1000XRWQLQ4RK5</epc>
+				</childEPCs>
+				<action>ADD</action>
+				<bizStep>urn:epcglobal:cbv:bizstep:packing</bizStep>
+				<disposition>urn:epcglobal:cbv:disp:in_progress</disposition>
+				<readPoint>
+					<id>urn:epc:id:sgln:5413787.00000.ESSERS</id>
+				</readPoint>
+				<bizLocation>
+					<id>urn:epc:id:sgln:5413787.00000.0</id>
+				</bizLocation>
+				<bizTransactionList><bizTransaction type="urn:epcglobal:cbv:btt:desadv">urn:epcglobal:cbv:bt:5413787000005:80011976</bizTransaction></bizTransactionList>
+			</AggregationEvent>
+		</EventList>
+	</EPCISBody>
+</epcis:EPCISDocument>
