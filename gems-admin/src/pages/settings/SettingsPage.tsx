@@ -9,7 +9,7 @@ import { BrandPreview } from '@/components/branding/BrandPreview'
 import { LogoUpload, ColorField } from '@/pages/auth/steps/Step2Branding'
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/context/ThemeContext'
-import { api } from '@/lib/api'
+import { api, resolveAssetUrl } from '@/lib/api'
 
 interface BrandingResponse {
   tenantId: string
@@ -36,7 +36,7 @@ export function SettingsPage() {
     if (brandingData) {
       setPrimaryColor(brandingData.primaryColor)
       setSecondaryColor(brandingData.secondaryColor)
-      setLogoPreviewUrl(brandingData.logoUrl)
+      setLogoPreviewUrl(resolveAssetUrl(brandingData.logoUrl) ?? null)
     }
   }, [brandingData])
 
@@ -73,12 +73,12 @@ export function SettingsPage() {
       applyTheme({
         primaryColor: res.primaryColor,
         secondaryColor: res.secondaryColor,
-        logoUrl: res.logoUrl ?? undefined,
+        logoUrl: resolveAssetUrl(res.logoUrl),
         tenantName: theme.tenantName,
       })
 
       // Update local preview with server-resolved logo URL
-      setLogoPreviewUrl(res.logoUrl)
+      setLogoPreviewUrl(resolveAssetUrl(res.logoUrl) ?? null)
       setLogoFile(null)
 
       toast.success('Branding updated successfully.')

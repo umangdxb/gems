@@ -50,6 +50,9 @@ export const uploadFile = async (
   const filePath = path.join(UPLOADS_DIR, filename)
   fs.writeFileSync(filePath, buffer)
 
-  const baseUrl = process.env['BASE_URL'] ?? 'http://localhost:3000'
-  return `${baseUrl}/uploads/${filename}`
+  const baseUrl = process.env['BASE_URL']
+  if (!baseUrl && process.env['NODE_ENV'] === 'production') {
+    console.warn('BASE_URL env var is not set — uploaded asset URLs will use localhost:3000')
+  }
+  return `${baseUrl ?? 'http://localhost:3000'}/uploads/${filename}`
 }

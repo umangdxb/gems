@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/context/ThemeContext'
-import { api } from '@/lib/api'
+import { api, resolveAssetUrl } from '@/lib/api'
 import type { User } from '@/context/AuthContext'
 
 interface LoginResponse {
@@ -52,7 +52,7 @@ export function LoginPage() {
       applyTheme({
         primaryColor: res.branding.primaryColor,
         secondaryColor: res.branding.secondaryColor,
-        logoUrl: res.branding.logoUrl ?? undefined,
+        logoUrl: resolveAssetUrl(res.branding.logoUrl),
         tenantName: res.branding.tenantName,
       })
 

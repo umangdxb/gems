@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { api } from '@/lib/api'
+import { api, resolveAssetUrl } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/context/ThemeContext'
 import { Step1OrgDetails, type OrgDetailsValues } from './steps/Step1OrgDetails'
@@ -85,7 +85,7 @@ export function SignupPage() {
       applyTheme({
         primaryColor: branding.primaryColor,
         secondaryColor: branding.secondaryColor,
-        logoUrl: logoUrl ?? undefined,
+        logoUrl: resolveAssetUrl(logoUrl),
         tenantName: orgDetails.orgName,
       })
 

@@ -1,5 +1,26 @@
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
+/**
+ * The backend sometimes persists absolute URLs with the origin it was running on
+ * at upload time (e.g. http://localhost:3000/uploads/...). When deployed, those
+ * URLs need their origin replaced with the configured API base URL.
+ */
+export function resolveAssetUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined
+  try {
+    const parsed = new URL(url)
+    const base = new URL(BASE_URL || window.location.origin)
+    if (parsed.origin !== base.origin) {
+      parsed.protocol = base.protocol
+      parsed.hostname = base.hostname
+      parsed.port = base.port
+    }
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit, explicitToken?: string): Promise<T> {
   const token = explicitToken ?? localStorage.getItem('gems_token')
   const res = await fetch(`${BASE_URL}${path}`, {
