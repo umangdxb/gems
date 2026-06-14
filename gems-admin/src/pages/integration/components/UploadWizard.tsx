@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -9,12 +10,21 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
+import { useAuth } from '@/context/AuthContext'
 import { Step1Upload } from './steps/Step1Upload'
 import { Step2Preview } from './steps/Step2Preview'
 import { Step3Map } from './steps/Step3Map'
-import { Step4Load } from './steps/Step4Load'
-import type { MappingConfig, MappingFieldKey, ParsedFile } from '../types'
+import { Step4Resolve, type ProcessTypeGroup } from './steps/Step4Resolve'
+import { Step5Load } from './steps/Step5Load'
+import type { MappingConfig, MappingFieldKey, ParsedFile, ProcessTypeResolution } from '../types'
 import { UI_KEY_TO_TARGET } from '../types'
+
+interface MasterConfig {
+  operationalKeys: Array<{
+    fieldName: string
+    valueMappings: Array<{ sourceValue: string; action: string }>
+  }>
+}
 
 interface Props {
   open: boolean
@@ -22,7 +32,9 @@ interface Props {
   onImported: () => void
 }
 
-const STEPS = ['Upload', 'Preview', 'Map Fields', 'Load']
+// Steps shown in the indicator — 'Resolve' is conditionally inserted at runtime
+const BASE_STEPS = ['Upload', 'Preview', 'Map Fields', 'Load']
+const STEPS_WITH_RESOLVE = ['Upload', 'Preview', 'Map Fields', 'Resolve', 'Load']
 
 const EMPTY_MAPPING: MappingConfig = {
   orderNumber: null,
@@ -50,13 +62,64 @@ export function UploadWizard({ open, onOpenChange, onImported }: Props) {
   const [parsedFile, setParsedFile] = useState<ParsedFile | null>(null)
   const [mapping, setMapping] = useState<MappingConfig>(EMPTY_MAPPING)
   const [mappingName, setMappingName] = useState('')
+  const [resolution, setResolution] = useState<ProcessTypeResolution>({})
   const [isLoading, setIsLoading] = useState(false)
+  const { user } = useAuth()
+
+  // Fetch master config to identify already-mapped process type values
+  const { data: masterConfig } = useQuery<MasterConfig>({
+    queryKey: ['master-config', user?.tenantId],
+    queryFn: () => api.get<MasterConfig>(`/tenants/${user!.tenantId}/master-config`),
+    enabled: !!user?.tenantId,
+    staleTime: 60_000,
+  })
+
+  // Build process type groups from parsed file — keyed by the mapped source column
+  const processTypeGroups = useMemo<ProcessTypeGroup[]>(() => {
+    if (!parsedFile || !mapping.processType) return []
+
+    const sourceCol = mapping.processType
+    const masterKeyConfig = masterConfig?.operationalKeys.find(k => k.fieldName === 'processType')
+    const masterMappings = new Map(masterKeyConfig?.valueMappings.map(m => [m.sourceValue, m.action]) ?? [])
+
+    // Count deliveries per unique process type value
+    // Group by the delivery reference column if mapped, otherwise count rows
+    const deliveryRefCol = mapping.deliveryRef
+    const deliveryCounts = new Map<string, Set<string>>()
+
+    for (const row of parsedFile.rows) {
+      const ptValue = String(row[sourceCol] ?? '').trim()
+      const deliveryId = deliveryRefCol ? String(row[deliveryRefCol] ?? '').trim() : `__row_${Math.random()}`
+      if (!deliveryCounts.has(ptValue)) deliveryCounts.set(ptValue, new Set())
+      deliveryCounts.get(ptValue)!.add(deliveryId)
+    }
+
+    return Array.from(deliveryCounts.entries()).map(([ptValue, deliveries]) => ({
+      processTypeValue: ptValue,
+      deliveryCount: deliveries.size,
+      resolvedAction: masterMappings.get(ptValue) as ProcessTypeGroup['resolvedAction'],
+    }))
+  }, [parsedFile, mapping.processType, mapping.deliveryRef, masterConfig])
+
+  // The resolve step is needed when processType is mapped AND any group lacks a master config resolution
+  const needsResolveStep = processTypeGroups.some(g => !g.resolvedAction)
+  const STEPS = needsResolveStep ? STEPS_WITH_RESOLVE : BASE_STEPS
+
+  // Map logical step indices accounting for the optional Resolve step
+  // step 0=Upload, 1=Preview, 2=Map, 3=Resolve(optional), 4=Load
+  // When no resolve step: 0=Upload, 1=Preview, 2=Map, 3=Load
+  const STEP_UPLOAD = 0
+  const STEP_PREVIEW = 1
+  const STEP_MAP = 2
+  const STEP_RESOLVE = needsResolveStep ? 3 : -1
+  const STEP_LOAD = needsResolveStep ? 4 : 3
 
   function reset() {
     setStep(0)
     setParsedFile(null)
     setMapping(EMPTY_MAPPING)
     setMappingName('')
+    setResolution({})
   }
 
   function handleClose(open: boolean) {
@@ -64,9 +127,15 @@ export function UploadWizard({ open, onOpenChange, onImported }: Props) {
     onOpenChange(open)
   }
 
+  // All unmapped process types must have an explicit resolution to advance from resolve step
+  const resolveStepComplete = processTypeGroups
+    .filter(g => !g.resolvedAction)
+    .every(g => !!resolution[g.processTypeValue])
+
   function canAdvance() {
-    if (step === 0) return parsedFile !== null
-    if (step === 2) return mapping.orderNumber !== null && mapping.material !== null
+    if (step === STEP_UPLOAD) return parsedFile !== null
+    if (step === STEP_MAP) return mapping.orderNumber !== null && mapping.material !== null
+    if (step === STEP_RESOLVE) return resolveStepComplete
     return true
   }
 
@@ -74,18 +143,30 @@ export function UploadWizard({ open, onOpenChange, onImported }: Props) {
     if (!parsedFile) return
     setIsLoading(true)
     try {
-      // 1. Import the file
       const formData = new FormData()
       formData.append('file', parsedFile.rawFile)
       const { defaultValues, ...fieldMappingKeys } = mapping
       formData.append('mapping', JSON.stringify({ ...fieldMappingKeys, defaultValues }))
 
-      const res = await api.uploadForm<{ rowCount: number; filename: string }>(
+      // Send user's explicit process type decisions alongside the file
+      const allResolutions: ProcessTypeResolution = {}
+      for (const g of processTypeGroups) {
+        if (g.resolvedAction) {
+          allResolutions[g.processTypeValue] = g.resolvedAction
+        } else if (resolution[g.processTypeValue]) {
+          allResolutions[g.processTypeValue] = resolution[g.processTypeValue]
+        }
+      }
+      if (Object.keys(allResolutions).length > 0) {
+        formData.append('processTypeOverrides', JSON.stringify(allResolutions))
+      }
+
+      const res = await api.uploadForm<{ rowCount: number; filename: string; warnings?: string[] }>(
         '/orders/import',
         formData
       )
 
-      // 2. Optionally save the mapping for future use
+      // Optionally save the mapping for future use
       if (mappingName.trim()) {
         try {
           await api.post('/orders/mappings', {
@@ -96,16 +177,16 @@ export function UploadWizard({ open, onOpenChange, onImported }: Props) {
             ...(Object.keys(mapping.defaultValues).length > 0 ? { defaultValues: mapping.defaultValues } : {}),
           })
         } catch {
-          // Non-fatal — import succeeded, just notify about the mapping save failure
           toast.warning('Import succeeded but mapping could not be saved.')
         }
       }
 
       onImported()
       handleClose(false)
-      toast.success(`${res.rowCount} rows loaded successfully`, {
-        description: res.filename,
-      })
+      toast.success(`${res.rowCount} rows loaded successfully`, { description: res.filename })
+      if (res.warnings?.length) {
+        res.warnings.forEach(w => toast.warning(w))
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Import failed. Please try again.')
     } finally {
@@ -147,30 +228,32 @@ export function UploadWizard({ open, onOpenChange, onImported }: Props) {
                 </span>
               </div>
               {i < STEPS.length - 1 && (
-                <div
-                  className={cn(
-                    'flex-1 h-px mx-2 min-w-[12px]',
-                    i < step ? 'bg-primary' : 'bg-border'
-                  )}
-                />
+                <div className={cn('flex-1 h-px mx-2 min-w-[12px]', i < step ? 'bg-primary' : 'bg-border')} />
               )}
             </div>
           ))}
         </div>
 
-        {/* Step content — scrollable so 10-field mapping list doesn't overflow the viewport */}
+        {/* Step content */}
         <div className="flex-1 overflow-y-auto min-w-0 w-full pr-1">
-          {step === 0 && (
+          {step === STEP_UPLOAD && (
             <Step1Upload parsedFile={parsedFile} onParsed={file => { setParsedFile(file); setStep(1) }} />
           )}
-          {step === 1 && parsedFile && (
+          {step === STEP_PREVIEW && parsedFile && (
             <Step2Preview parsedFile={parsedFile} />
           )}
-          {step === 2 && parsedFile && (
+          {step === STEP_MAP && parsedFile && (
             <Step3Map parsedFile={parsedFile} mapping={mapping} onChange={setMapping} />
           )}
-          {step === 3 && parsedFile && (
-            <Step4Load
+          {step === STEP_RESOLVE && parsedFile && (
+            <Step4Resolve
+              groups={processTypeGroups}
+              resolution={resolution}
+              onChange={setResolution}
+            />
+          )}
+          {step === STEP_LOAD && parsedFile && (
+            <Step5Load
               parsedFile={parsedFile}
               mapping={mapping}
               mappingName={mappingName}

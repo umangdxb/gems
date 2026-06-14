@@ -1,6 +1,6 @@
 import { Schema, model, Document, Types } from 'mongoose'
 
-export type OrderType = 'picking' | 'packing' | 'commissioning' | 'decommissioning' | 'shipping'
+export type OrderType = 'picking' | 'packing' | 'commissioning' | 'decommissioning' | 'shipping' | 'receiving'
 export type OrderStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
 
 export interface IOrderItem {
@@ -70,7 +70,7 @@ const deliveryOrderSchema = new Schema<IDeliveryOrder>({
   orderNumber: { type: String, required: true },
   orderType: {
     type: String,
-    enum: ['picking', 'packing', 'commissioning', 'decommissioning', 'shipping'],
+    enum: ['picking', 'packing', 'commissioning', 'decommissioning', 'shipping', 'receiving'],
     required: true,
   },
   warehouse: { type: String, default: '' },

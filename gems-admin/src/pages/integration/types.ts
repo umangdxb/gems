@@ -51,6 +51,14 @@ export interface JobsResponse {
   limit: number
 }
 
+export type OrderType = 'picking' | 'packing' | 'commissioning' | 'decommissioning' | 'shipping' | 'receiving'
+
+/**
+ * Per-process-type decision made by the user in the Resolve step.
+ * 'skip' means explicitly exclude those deliveries from this import.
+ */
+export type ProcessTypeResolution = Record<string, OrderType | 'skip'>
+
 /** Saved field mapping stored per tenant in the backend */
 export interface SavedMapping {
   _id: string

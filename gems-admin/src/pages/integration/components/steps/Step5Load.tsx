@@ -24,7 +24,7 @@ const FIELD_LABELS: Record<import('../../types').MappingFieldKey, string> = {
   confirmedAt: 'Confirmed At',
 }
 
-export function Step4Load({ parsedFile, mapping, mappingName, onMappingNameChange }: Props) {
+export function Step5Load({ parsedFile, mapping, mappingName, onMappingNameChange }: Props) {
   const mappedCount = (Object.keys(FIELD_LABELS) as import('../../types').MappingFieldKey[]).filter(k => mapping[k]).length
 
   return (

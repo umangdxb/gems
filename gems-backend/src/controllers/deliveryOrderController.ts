@@ -12,6 +12,7 @@ const BIZSTEP: Record<OrderType, string> = {
   commissioning:   'urn:epcglobal:cbv:bizstep:commissioning',
   decommissioning: 'urn:epcglobal:cbv:bizstep:decommissioning',
   shipping:        'urn:epcglobal:cbv:bizstep:shipping',
+  receiving:       'urn:epcglobal:cbv:bizstep:receiving',
 }
 
 function generateEpcisXml(order: InstanceType<typeof DeliveryOrder>): string {
@@ -99,7 +100,7 @@ function groupByDelivery(records: Record<string, unknown>[]): Map<string, Delive
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-const VALID_ORDER_TYPES: OrderType[] = ['picking', 'packing', 'commissioning', 'decommissioning', 'shipping']
+const VALID_ORDER_TYPES: OrderType[] = ['picking', 'packing', 'commissioning', 'decommissioning', 'shipping', 'receiving']
 
 export const importDeliveryOrders = async (req: Request, res: Response) => {
   const tenantId = req.tenant!._id
@@ -107,6 +108,17 @@ export const importDeliveryOrders = async (req: Request, res: Response) => {
 
   if (!req.file) {
     return res.status(400).json({ message: 'A JSON file is required (field name: file)' })
+  }
+
+  // processTypeOverrides: user-explicit decisions from the frontend Resolve step
+  // Format: { "Y214": "picking", "Y999": "skip" }
+  let processTypeOverrides: Record<string, string> = {}
+  if (req.body.processTypeOverrides) {
+    try {
+      processTypeOverrides = JSON.parse(req.body.processTypeOverrides)
+    } catch {
+      return res.status(400).json({ message: 'processTypeOverrides must be valid JSON' })
+    }
   }
 
   let records: Record<string, unknown>[]
@@ -124,7 +136,7 @@ export const importDeliveryOrders = async (req: Request, res: Response) => {
   }
 
   try {
-    // Resolve orderType per delivery from WarehouseProcessType via master config
+    // Fetch master config as fallback when no override is provided
     const masterConfig = await MasterConfig.findOne({ tenantId })
     const processTypeKey = masterConfig?.operationalKeys.find(k => k.fieldName === 'processType')
     console.log(`[importDeliveryOrders] masterConfig found=${!!masterConfig} processTypeKey found=${!!processTypeKey}`)
@@ -134,9 +146,20 @@ export const importDeliveryOrders = async (req: Request, res: Response) => {
     const skipped: string[] = []
 
     for (const [orderNumber, { warehouse, processType, items }] of groups.entries()) {
+      // Resolution priority: explicit user override → master config lookup
+      const override = processTypeOverrides[processType]
+
+      if (override === 'skip') {
+        console.log(`[importDeliveryOrders] delivery=${orderNumber} processType="${processType}" — explicitly skipped by user`)
+        skipped.push(orderNumber)
+        continue
+      }
+
       let orderType: OrderType | undefined
 
-      if (processTypeKey && processType) {
+      if (override && VALID_ORDER_TYPES.includes(override as OrderType)) {
+        orderType = override as OrderType
+      } else if (processTypeKey && processType) {
         const vm = processTypeKey.valueMappings.find(m => m.sourceValue === processType)
         if (vm && VALID_ORDER_TYPES.includes(vm.action as OrderType)) {
           orderType = vm.action as OrderType
@@ -146,8 +169,10 @@ export const importDeliveryOrders = async (req: Request, res: Response) => {
       console.log(`[importDeliveryOrders] delivery=${orderNumber} processType="${processType}" resolvedOrderType=${orderType ?? 'NONE'}`)
 
       if (!orderType) {
-        skipped.push(`${orderNumber} (WarehouseProcessType="${processType || 'empty'}")`)
-        continue
+        // This should not happen if the frontend enforced resolution — guard defensively
+        return res.status(400).json({
+          message: `No order type resolved for delivery ${orderNumber} (WarehouseProcessType="${processType}"). Ensure all process types are mapped in Master Configuration or resolved during upload.`,
+        })
       }
 
       const order = await DeliveryOrder.create({
@@ -168,7 +193,7 @@ export const importDeliveryOrders = async (req: Request, res: Response) => {
 
     if (created.length === 0) {
       return res.status(400).json({
-        message: 'Could not resolve order type for any delivery. Configure WarehouseProcessType value mappings in Master Configuration.',
+        message: 'All deliveries were skipped. No orders were created.',
         skipped,
       })
     }
@@ -178,7 +203,7 @@ export const importDeliveryOrders = async (req: Request, res: Response) => {
       importBatchId,
       ordersCreated: created.length,
       orderNumbers: created.map(o => o.orderNumber),
-      ...(skipped.length > 0 ? { warnings: [`${skipped.length} deliveries skipped — no master config mapping: ${skipped.join(', ')}`] } : {}),
+      ...(skipped.length > 0 ? { warnings: [`${skipped.length} deliver${skipped.length !== 1 ? 'ies' : 'y'} skipped by user choice: ${skipped.join(', ')}`] } : {}),
     })
   } catch (err) {
     console.error('[importDeliveryOrders] error:', err)
