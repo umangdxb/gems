@@ -13,7 +13,7 @@ import { Step1Upload } from './steps/Step1Upload'
 import { Step2Preview } from './steps/Step2Preview'
 import { Step3Map } from './steps/Step3Map'
 import { Step4Load } from './steps/Step4Load'
-import type { MappingConfig, ParsedFile } from '../types'
+import type { MappingConfig, MappingFieldKey, ParsedFile } from '../types'
 import { UI_KEY_TO_TARGET } from '../types'
 
 interface Props {
@@ -30,10 +30,17 @@ const EMPTY_MAPPING: MappingConfig = {
   batch: null,
   sourceBin: null,
   quantity: null,
+  destinationBin: null,
+  warehouse: null,
+  deliveryRef: null,
+  processType: null,
+  confirmedAt: null,
+  defaultValues: {},
 }
 
 function toFieldMappings(mapping: MappingConfig) {
-  return (Object.entries(mapping) as [keyof MappingConfig, string | null][])
+  const { defaultValues: _, ...fieldEntries } = mapping
+  return (Object.entries(fieldEntries) as [MappingFieldKey, string | null][])
     .filter(([, v]) => v !== null)
     .map(([k, v]) => ({ sourceField: v!, targetField: UI_KEY_TO_TARGET[k] }))
 }
@@ -70,13 +77,8 @@ export function UploadWizard({ open, onOpenChange, onImported }: Props) {
       // 1. Import the file
       const formData = new FormData()
       formData.append('file', parsedFile.rawFile)
-      formData.append('mapping', JSON.stringify({
-        orderNumber: mapping.orderNumber,
-        material: mapping.material,
-        batch: mapping.batch,
-        sourceBin: mapping.sourceBin,
-        quantity: mapping.quantity,
-      }))
+      const { defaultValues, ...fieldMappingKeys } = mapping
+      formData.append('mapping', JSON.stringify({ ...fieldMappingKeys, defaultValues }))
 
       const res = await api.uploadForm<{ rowCount: number; filename: string }>(
         '/orders/import',
@@ -91,6 +93,7 @@ export function UploadWizard({ open, onOpenChange, onImported }: Props) {
             sourceFormat: 'json',
             arrayRootPath: parsedFile.arrayRootPath,
             fieldMappings: toFieldMappings(mapping),
+            ...(Object.keys(mapping.defaultValues).length > 0 ? { defaultValues: mapping.defaultValues } : {}),
           })
         } catch {
           // Non-fatal — import succeeded, just notify about the mapping save failure
@@ -114,7 +117,7 @@ export function UploadWizard({ open, onOpenChange, onImported }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-2xl overflow-hidden">
+      <DialogContent className="sm:max-w-2xl flex flex-col max-h-[90vh]">
         <DialogHeader>
           <DialogTitle>New Upload</DialogTitle>
         </DialogHeader>
@@ -155,8 +158,8 @@ export function UploadWizard({ open, onOpenChange, onImported }: Props) {
           ))}
         </div>
 
-        {/* Step content */}
-        <div className="min-h-[260px] min-w-0 w-full overflow-hidden">
+        {/* Step content — scrollable so 10-field mapping list doesn't overflow the viewport */}
+        <div className="flex-1 overflow-y-auto min-w-0 w-full pr-1">
           {step === 0 && (
             <Step1Upload parsedFile={parsedFile} onParsed={file => { setParsedFile(file); setStep(1) }} />
           )}

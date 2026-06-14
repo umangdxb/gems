@@ -11,6 +11,7 @@ export interface IIntegrationMapping extends Document {
     sourceField: string     // key in the source record, e.g. "WarehouseTask"
     targetField: string     // Order model field, e.g. "orderNum"
   }>
+  defaultValues?: Record<string, string>  // targetField → fallback value when source is missing
 }
 
 const integrationMappingSchema = new Schema<IIntegrationMapping>({
@@ -24,6 +25,7 @@ const integrationMappingSchema = new Schema<IIntegrationMapping>({
       targetField: { type: String, required: true },
     },
   ],
+  defaultValues: { type: Schema.Types.Mixed },
 }, { timestamps: true })
 
 export const IntegrationMapping = model<IIntegrationMapping>('IntegrationMapping', integrationMappingSchema)

@@ -3,18 +3,9 @@ import { Upload, FileJson, CheckCircle2, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { api } from '@/lib/api'
-import type { OrderType, ImportResult } from '../types'
-
-const ORDER_TYPES: { value: OrderType; label: string }[] = [
-  { value: 'picking', label: 'Picking' },
-  { value: 'packing', label: 'Packing' },
-  { value: 'commissioning', label: 'Commissioning' },
-  { value: 'decommissioning', label: 'Decommissioning' },
-  { value: 'shipping', label: 'Shipping' },
-]
+import type { ImportResult } from '../types'
 
 interface Props {
   onImported: () => void
@@ -23,11 +14,11 @@ interface Props {
 interface ParsedPreview {
   file: File
   deliveryNumbers: string[]
+  processTypes: string[]   // unique WarehouseProcessType values found in the file
   totalRecords: number
 }
 
 export function CreateOrderPanel({ onImported }: Props) {
-  const [orderType, setOrderType] = useState<OrderType | ''>('')
   const [preview, setPreview] = useState<ParsedPreview | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -44,14 +35,18 @@ export function CreateOrderPanel({ onImported }: Props) {
           : parsed?.value ?? []
 
         const deliverySet = new Set<string>()
+        const processTypeSet = new Set<string>()
         for (const r of records) {
           const dn = String((r as Record<string, unknown>)['EWMDelivery'] ?? '').trim()
           if (dn) deliverySet.add(dn)
+          const pt = String((r as Record<string, unknown>)['WarehouseProcessType'] ?? '').trim()
+          if (pt) processTypeSet.add(pt)
         }
 
         setPreview({
           file,
           deliveryNumbers: Array.from(deliverySet),
+          processTypes: Array.from(processTypeSet),
           totalRecords: records.length,
         })
       } catch {
@@ -78,16 +73,22 @@ export function CreateOrderPanel({ onImported }: Props) {
   }
 
   async function handleImport() {
-    if (!preview || !orderType) return
+    if (!preview) return
     setIsLoading(true)
     try {
       const formData = new FormData()
       formData.append('file', preview.file)
-      formData.append('orderType', orderType)
-      const result = await api.uploadForm<ImportResult>('/delivery-orders/import', formData)
-      toast.success(`${result.ordersCreated} order${result.ordersCreated !== 1 ? 's' : ''} imported successfully`)
+      const result = await api.uploadForm<ImportResult & { warnings?: string[] }>('/delivery-orders/import', formData)
+
+      if (result.warnings?.length) {
+        toast.warning(`${result.ordersCreated} order${result.ordersCreated !== 1 ? 's' : ''} imported`, {
+          description: result.warnings[0],
+        })
+      } else {
+        toast.success(`${result.ordersCreated} order${result.ordersCreated !== 1 ? 's' : ''} imported successfully`)
+      }
+
       setPreview(null)
-      setOrderType('')
       onImported()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Import failed')
@@ -101,7 +102,7 @@ export function CreateOrderPanel({ onImported }: Props) {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  const canImport = !!preview && !!orderType && preview.deliveryNumbers.length > 0
+  const canImport = !!preview && preview.deliveryNumbers.length > 0
 
   return (
     <Card className="h-full flex flex-col">
@@ -109,21 +110,6 @@ export function CreateOrderPanel({ onImported }: Props) {
         <CardTitle className="text-base">Create Orders</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-5 flex-1">
-        {/* Order type */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium">Order Type</label>
-          <Select value={orderType} onValueChange={v => setOrderType(v as OrderType)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select order type…" />
-            </SelectTrigger>
-            <SelectContent>
-              {ORDER_TYPES.map(t => (
-                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
         {/* File drop zone */}
         {!preview ? (
           <div
@@ -170,7 +156,7 @@ export function CreateOrderPanel({ onImported }: Props) {
                 </span>
                 <CheckCircle2 className="size-4 text-green-500" />
               </div>
-              <div className="max-h-[200px] overflow-y-auto flex flex-wrap gap-1.5 p-2 rounded-md border bg-background">
+              <div className="max-h-[160px] overflow-y-auto flex flex-wrap gap-1.5 p-2 rounded-md border bg-background">
                 {preview.deliveryNumbers.map(dn => (
                   <Badge key={dn} variant="secondary" className="text-xs font-mono">
                     {dn}
@@ -178,6 +164,22 @@ export function CreateOrderPanel({ onImported }: Props) {
                 ))}
               </div>
             </div>
+
+            {/* Detected process types */}
+            {preview.processTypes.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Detected process types (resolved via Master Configuration)
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {preview.processTypes.map(pt => (
+                    <Badge key={pt} variant="outline" className="text-xs font-mono">
+                      {pt}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

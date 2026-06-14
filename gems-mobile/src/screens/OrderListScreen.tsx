@@ -63,9 +63,8 @@ export const OrderListScreen: React.FC<Props> = ({ navigation }) => {
       const data = await api.get<OrdersListResponse>(`/delivery-orders?${params.toString()}`);
       setOrders(data.orders);
     } catch (err) {
-      if (!silent) {
-        Alert.alert('Error', 'Could not load orders. Check your connection.');
-      }
+      console.error('[OrderList] fetch failed:', err);
+      Alert.alert('Error', err instanceof Error ? err.message : 'Could not load orders. Check your connection.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);

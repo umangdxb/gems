@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import { v4 as uuidv4 } from 'uuid'
 import { DeliveryOrder, type OrderType, type IOrderItem } from '../models/DeliveryOrder'
+import { MasterConfig } from '../models/MasterConfig'
 import { parseJson } from '../services/fileParserService'
 
 // ── EPCIS ────────────────────────────────────────────────────────────────────
@@ -48,12 +49,19 @@ ${epcListXml}
 
 // ── Parsing ───────────────────────────────────────────────────────────────────
 
+interface DeliveryGroup {
+  warehouse: string
+  processType: string  // from WarehouseProcessType field — used to derive orderType via master config
+  items: Omit<IOrderItem, 'scannedEpcs'>[]
+}
+
 /**
  * Parse SAP EWM WarehouseTask records and group them by EWMDelivery number.
  * Each unique delivery becomes one DeliveryOrder with its warehouse tasks as items.
+ * processType is captured from the first record of each delivery group.
  */
-function groupByDelivery(records: Record<string, unknown>[]): Map<string, { warehouse: string; items: Omit<IOrderItem, 'scannedEpcs'>[] }> {
-  const groups = new Map<string, { warehouse: string; items: Omit<IOrderItem, 'scannedEpcs'>[] }>()
+function groupByDelivery(records: Record<string, unknown>[]): Map<string, DeliveryGroup> {
+  const groups = new Map<string, DeliveryGroup>()
 
   for (const record of records) {
     const deliveryNumber = String(record['EWMDelivery'] ?? '').trim()
@@ -79,6 +87,7 @@ function groupByDelivery(records: Record<string, unknown>[]): Map<string, { ware
     if (!groups.has(deliveryNumber)) {
       groups.set(deliveryNumber, {
         warehouse: String(record['EWMWarehouse'] ?? ''),
+        processType: String(record['WarehouseProcessType'] ?? '').trim(),
         items: [],
       })
     }
@@ -90,14 +99,11 @@ function groupByDelivery(records: Record<string, unknown>[]): Map<string, { ware
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
+const VALID_ORDER_TYPES: OrderType[] = ['picking', 'packing', 'commissioning', 'decommissioning', 'shipping']
+
 export const importDeliveryOrders = async (req: Request, res: Response) => {
   const tenantId = req.tenant!._id
-  const { orderType } = req.body as { orderType: OrderType }
-
-  const validTypes: OrderType[] = ['picking', 'packing', 'commissioning', 'decommissioning', 'shipping']
-  if (!orderType || !validTypes.includes(orderType)) {
-    return res.status(400).json({ message: `orderType must be one of: ${validTypes.join(', ')}` })
-  }
+  console.log(`[importDeliveryOrders] tenantId=${tenantId} file=${req.file?.originalname}`)
 
   if (!req.file) {
     return res.status(400).json({ message: 'A JSON file is required (field name: file)' })
@@ -107,19 +113,44 @@ export const importDeliveryOrders = async (req: Request, res: Response) => {
   try {
     records = parseJson(req.file.buffer.toString('utf-8'))
   } catch (err) {
+    console.error('[importDeliveryOrders] JSON parse error:', err)
     return res.status(400).json({ message: `Failed to parse JSON: ${err instanceof Error ? err.message : 'Unknown error'}` })
   }
 
   const groups = groupByDelivery(records)
+  console.log(`[importDeliveryOrders] grouped into ${groups.size} deliveries`)
   if (groups.size === 0) {
     return res.status(400).json({ message: 'No records with a valid EWMDelivery number found in the file.' })
   }
 
-  const importBatchId = uuidv4()
+  try {
+    // Resolve orderType per delivery from WarehouseProcessType via master config
+    const masterConfig = await MasterConfig.findOne({ tenantId })
+    const processTypeKey = masterConfig?.operationalKeys.find(k => k.fieldName === 'processType')
+    console.log(`[importDeliveryOrders] masterConfig found=${!!masterConfig} processTypeKey found=${!!processTypeKey}`)
 
-  const created = await Promise.all(
-    Array.from(groups.entries()).map(([orderNumber, { warehouse, items }]) =>
-      DeliveryOrder.create({
+    const importBatchId = uuidv4()
+    const created: InstanceType<typeof DeliveryOrder>[] = []
+    const skipped: string[] = []
+
+    for (const [orderNumber, { warehouse, processType, items }] of groups.entries()) {
+      let orderType: OrderType | undefined
+
+      if (processTypeKey && processType) {
+        const vm = processTypeKey.valueMappings.find(m => m.sourceValue === processType)
+        if (vm && VALID_ORDER_TYPES.includes(vm.action as OrderType)) {
+          orderType = vm.action as OrderType
+        }
+      }
+
+      console.log(`[importDeliveryOrders] delivery=${orderNumber} processType="${processType}" resolvedOrderType=${orderType ?? 'NONE'}`)
+
+      if (!orderType) {
+        skipped.push(`${orderNumber} (WarehouseProcessType="${processType || 'empty'}")`)
+        continue
+      }
+
+      const order = await DeliveryOrder.create({
         tenantId,
         orderNumber,
         orderType,
@@ -132,14 +163,27 @@ export const importDeliveryOrders = async (req: Request, res: Response) => {
         epcisGeneratedAt: null,
         completedAt: null,
       })
-    )
-  )
+      created.push(order)
+    }
 
-  return res.status(201).json({
-    importBatchId,
-    ordersCreated: created.length,
-    orderNumbers: created.map(o => o.orderNumber),
-  })
+    if (created.length === 0) {
+      return res.status(400).json({
+        message: 'Could not resolve order type for any delivery. Configure WarehouseProcessType value mappings in Master Configuration.',
+        skipped,
+      })
+    }
+
+    console.log(`[importDeliveryOrders] created=${created.length} skipped=${skipped.length}`)
+    return res.status(201).json({
+      importBatchId,
+      ordersCreated: created.length,
+      orderNumbers: created.map(o => o.orderNumber),
+      ...(skipped.length > 0 ? { warnings: [`${skipped.length} deliveries skipped — no master config mapping: ${skipped.join(', ')}`] } : {}),
+    })
+  } catch (err) {
+    console.error('[importDeliveryOrders] error:', err)
+    return res.status(500).json({ message: err instanceof Error ? err.message : 'Import failed' })
+  }
 }
 
 export const listDeliveryOrders = async (req: Request, res: Response) => {
@@ -209,11 +253,16 @@ export const completeDeliveryOrder = async (req: Request, res: Response) => {
   }
 
   // Apply scanned EPCs from request body
-  const scannedItems = req.body.items as Array<{ lineNumber: string; scannedEpcs: string[] }> | undefined
+  const scannedItems = req.body.items as Array<{ lineNumber: string; scannedEpcs: string[]; sourceBin?: string }> | undefined
   if (scannedItems && Array.isArray(scannedItems)) {
     for (const scanned of scannedItems) {
       const item = order.items.find(i => i.lineNumber === scanned.lineNumber)
-      if (item) item.scannedEpcs = scanned.scannedEpcs ?? []
+      if (item) {
+        item.scannedEpcs = scanned.scannedEpcs ?? []
+        if (scanned.sourceBin !== undefined && scanned.sourceBin !== '') {
+          item.sourceBin = scanned.sourceBin
+        }
+      }
     }
   }
 

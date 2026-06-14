@@ -18,6 +18,7 @@ import {
   ArrowLeftRight,
   ClipboardList,
   Settings,
+  SlidersHorizontal,
   LogOut,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
@@ -30,6 +31,7 @@ const navItems = [
   { label: 'Integration', to: '/integration', icon: ArrowLeftRight, adminOnly: false },
   { label: 'Orders', to: '/orders', icon: ClipboardList, adminOnly: false },
   { label: 'Settings', to: '/settings', icon: Settings, adminOnly: false },
+  { label: 'Master Config', to: '/master-config', icon: SlidersHorizontal, adminOnly: true },
 ]
 
 function initials(name: string) {

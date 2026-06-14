@@ -1,12 +1,21 @@
 export type JobStatus = 'pending' | 'processing' | 'done' | 'failed'
 
 export interface MappingConfig {
-  orderNumber: string | null  // maps to backend field: orderNum  (required)
-  material: string | null     // maps to backend field: material  (required)
-  batch: string | null        // maps to backend field: batch
-  sourceBin: string | null    // maps to backend field: bin
-  quantity: string | null     // maps to backend field: qty
+  orderNumber: string | null      // maps to backend field: orderNum  (required)
+  material: string | null         // maps to backend field: material  (required)
+  batch: string | null            // maps to backend field: batch
+  sourceBin: string | null        // maps to backend field: bin
+  quantity: string | null         // maps to backend field: qty
+  destinationBin: string | null   // maps to backend field: destinationBin
+  warehouse: string | null        // maps to backend field: warehouse
+  deliveryRef: string | null      // maps to backend field: deliveryRef
+  processType: string | null      // maps to backend field: processType (operational key)
+  confirmedAt: string | null      // maps to backend field: confirmedAt
+  defaultValues: Record<string, string>  // targetField → fallback when source value is missing
 }
+
+/** All MappingConfig keys that represent source field selectors (excludes defaultValues) */
+export type MappingFieldKey = Exclude<keyof MappingConfig, 'defaultValues'>
 
 export interface ParsedFile {
   /** All field keys extracted from the first record */
@@ -53,19 +62,29 @@ export interface SavedMapping {
 }
 
 /** Maps UI MappingConfig keys → internal Order field names (same as backend UI_KEY_TO_FIELD) */
-export const UI_KEY_TO_TARGET: Record<keyof MappingConfig, string> = {
+export const UI_KEY_TO_TARGET: Record<MappingFieldKey, string> = {
   orderNumber: 'orderNum',
   material: 'material',
   batch: 'batch',
   sourceBin: 'bin',
   quantity: 'qty',
+  destinationBin: 'destinationBin',
+  warehouse: 'warehouse',
+  deliveryRef: 'deliveryRef',
+  processType: 'processType',
+  confirmedAt: 'confirmedAt',
 }
 
 /** Reverse: internal Order field names → UI MappingConfig keys */
-export const TARGET_TO_UI_KEY: Record<string, keyof MappingConfig> = {
+export const TARGET_TO_UI_KEY: Record<string, MappingFieldKey> = {
   orderNum: 'orderNumber',
   material: 'material',
   batch: 'batch',
   bin: 'sourceBin',
   qty: 'quantity',
+  destinationBin: 'destinationBin',
+  warehouse: 'warehouse',
+  deliveryRef: 'deliveryRef',
+  processType: 'processType',
+  confirmedAt: 'confirmedAt',
 }

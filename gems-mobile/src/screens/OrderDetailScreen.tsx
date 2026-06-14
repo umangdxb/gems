@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,11 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
-  ScrollView,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -27,6 +31,10 @@ type Props = {
   route: RouteProp<RootStackParamList, 'OrderDetail'>;
 };
 
+type ScanMode =
+  | { type: 'epc'; lineNumber: string }
+  | { type: 'bin'; lineNumber: string };
+
 export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const { orderId } = route.params;
   const { theme } = useTheme();
@@ -38,8 +46,14 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // scannedEpcs: per-item local accumulator (keyed by lineNumber)
   const [scannedEpcs, setScannedEpcs] = useState<Record<string, string[]>>({});
-  // which item is currently being scanned (lineNumber | null)
-  const [scanningFor, setScanningFor] = useState<string | null>(null);
+  // overriddenBins: per-item source bin overrides (keyed by lineNumber)
+  const [overriddenBins, setOverriddenBins] = useState<Record<string, string>>({});
+
+  // unified scan mode — null when scanner is closed
+  const [scanMode, setScanMode] = useState<ScanMode | null>(null);
+
+  // bin text edit modal
+  const [editingBin, setEditingBin] = useState<{ lineNumber: string; value: string } | null>(null);
 
   useEffect(() => {
     fetchOrder();
@@ -50,13 +64,11 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     try {
       const data = await api.get<DeliveryOrder>(`/delivery-orders/${orderId}`);
       setOrder(data);
-      // Pre-fill any EPCs already stored on the order (e.g. resumed session)
       const existing: Record<string, string[]> = {};
       for (const item of data.items) {
         if (item.scannedEpcs?.length) existing[item.lineNumber] = [...item.scannedEpcs];
       }
       setScannedEpcs(existing);
-      // Auto-transition to in_progress if still pending
       if (data.status === 'pending') {
         await api.patch(`/delivery-orders/${orderId}/status`, { status: 'in_progress' });
       }
@@ -68,17 +80,26 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }
 
-  function handleBarcodeScanned(rawData: string) {
-    if (!scanningFor) return;
+  // ── Unified scan handler ──────────────────────────────────────────────────
+  function handleScan(rawData: string) {
+    if (!scanMode) return;
+
+    if (scanMode.type === 'bin') {
+      setOverriddenBins(prev => ({ ...prev, [scanMode.lineNumber]: rawData }));
+      setScanMode(null); // one scan is enough for a bin
+      return;
+    }
+
+    // EPC scan — add to list
     let epc = rawData;
     if (isLikelyGS1Data(rawData)) {
       const gs1 = parseGS1DataMatrix(rawData);
       epc = createGS1Identifier(gs1);
     }
     setScannedEpcs(prev => {
-      const existing = prev[scanningFor] ?? [];
-      if (existing.includes(epc)) return prev; // duplicate
-      return { ...prev, [scanningFor]: [...existing, epc] };
+      const existing = prev[scanMode.lineNumber] ?? [];
+      if (existing.includes(epc)) return prev;
+      return { ...prev, [scanMode.lineNumber]: [...existing, epc] };
     });
   }
 
@@ -89,6 +110,30 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     }));
   }
 
+  // ── Bin edit helpers ──────────────────────────────────────────────────────
+  function openBinEdit(item: OrderItem) {
+    setEditingBin({
+      lineNumber: item.lineNumber,
+      value: overriddenBins[item.lineNumber] ?? item.sourceBin ?? '',
+    });
+  }
+
+  function saveBinEdit() {
+    if (!editingBin) return;
+    if (editingBin.value.trim()) {
+      setOverriddenBins(prev => ({ ...prev, [editingBin.lineNumber]: editingBin.value.trim() }));
+    }
+    setEditingBin(null);
+  }
+
+  function switchToScan() {
+    if (!editingBin) return;
+    const lineNumber = editingBin.lineNumber;
+    setEditingBin(null);
+    setScanMode({ type: 'bin', lineNumber });
+  }
+
+  // ── Completion ────────────────────────────────────────────────────────────
   const totalScanned = Object.values(scannedEpcs).reduce((sum, epcs) => sum + epcs.length, 0);
 
   async function handleComplete() {
@@ -114,6 +159,9 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       const items = order.items.map(item => ({
         lineNumber: item.lineNumber,
         scannedEpcs: scannedEpcs[item.lineNumber] ?? [],
+        ...(overriddenBins[item.lineNumber] !== undefined
+          ? { sourceBin: overriddenBins[item.lineNumber] }
+          : {}),
       }));
       const result = await api.post<{ id: string; status: string; epcisGeneratedAt: string }>(
         `/delivery-orders/${orderId}/complete`,
@@ -130,8 +178,12 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }
 
+  // ── Render item ───────────────────────────────────────────────────────────
   const renderItem = ({ item, index }: { item: OrderItem; index: number }) => {
     const epcs = scannedEpcs[item.lineNumber] ?? [];
+    const sourceBin = overriddenBins[item.lineNumber] ?? item.sourceBin;
+    const binEdited = overriddenBins[item.lineNumber] !== undefined && overriddenBins[item.lineNumber] !== item.sourceBin;
+
     return (
       <Card variant="outlined" style={styles.itemCard} key={item.lineNumber}>
         {/* Item header row */}
@@ -151,9 +203,9 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
           <TouchableOpacity
             style={[styles.scanBtn, { backgroundColor: colors.primary }]}
-            onPress={() => setScanningFor(item.lineNumber)}
+            onPress={() => setScanMode({ type: 'epc', lineNumber: item.lineNumber })}
           >
-            <Text style={[styles.scanBtnText, { color: colors.textInverse }]}>Scan</Text>
+            <Text style={[styles.scanBtnText, { color: colors.textInverse }]}>Scan EPC</Text>
           </TouchableOpacity>
         </View>
 
@@ -165,12 +217,22 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               {item.quantity} {item.unit}
             </Text>
           </View>
-          <View style={styles.itemGridCell}>
-            <Text style={[styles.gridLabel, { color: colors.textTertiary }]}>Source</Text>
-            <Text style={[styles.gridValue, { color: colors.textPrimary }]} numberOfLines={1}>
-              {item.sourceBin || '—'}
+
+          {/* Source Bin — tappable */}
+          <TouchableOpacity style={styles.itemGridCell} onPress={() => openBinEdit(item)} activeOpacity={0.7}>
+            <Text style={[styles.gridLabel, { color: colors.textTertiary }]}>Source Bin ✎</Text>
+            <Text
+              style={[
+                styles.gridValue,
+                { color: binEdited ? colors.primary : colors.textPrimary },
+                binEdited && { fontWeight: '700' },
+              ]}
+              numberOfLines={1}
+            >
+              {sourceBin || '—'}
             </Text>
-          </View>
+          </TouchableOpacity>
+
           <View style={styles.itemGridCell}>
             <Text style={[styles.gridLabel, { color: colors.textTertiary }]}>Dest</Text>
             <Text style={[styles.gridValue, { color: colors.textPrimary }]} numberOfLines={1}>
@@ -271,17 +333,55 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         }
       />
 
+      {/* Unified barcode scanner */}
       <BarcodeScanner
-        visible={scanningFor !== null}
-        onClose={() => setScanningFor(null)}
-        onScan={handleBarcodeScanned}
-        title="Scan EPC"
+        visible={scanMode !== null}
+        onClose={() => setScanMode(null)}
+        onScan={handleScan}
+        title={scanMode?.type === 'bin' ? 'Scan Source Bin' : 'Scan EPC'}
         instruction={
-          scanningFor
-            ? `Scanning for: ${order.items.find(i => i.lineNumber === scanningFor)?.product ?? scanningFor}`
-            : 'Scan barcode'
+          scanMode?.type === 'bin'
+            ? 'Scan the source storage bin barcode'
+            : scanMode
+            ? `Scanning for: ${order.items.find(i => i.lineNumber === scanMode.lineNumber)?.product ?? scanMode.lineNumber}`
+            : ''
         }
       />
+
+      {/* Source bin edit modal */}
+      <Modal visible={editingBin !== null} transparent animationType="fade" onRequestClose={() => setEditingBin(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setEditingBin(null)} />
+          <View style={[styles.modalContent, { backgroundColor: colors.backgroundLight }]}>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Edit Source Bin</Text>
+            <TextInput
+              style={[styles.modalInput, { color: colors.textPrimary, borderColor: colors.borderLight, backgroundColor: colors.backgroundDark }]}
+              value={editingBin?.value ?? ''}
+              onChangeText={v => setEditingBin(prev => prev ? { ...prev, value: v } : null)}
+              placeholder="Enter bin code…"
+              placeholderTextColor={colors.textTertiary}
+              autoCapitalize="characters"
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={saveBinEdit}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: colors.backgroundDark, borderColor: colors.borderLight }]}
+                onPress={switchToScan}
+              >
+                <Text style={[styles.modalBtnText, { color: colors.primary }]}>📷 Scan instead</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: colors.primary }]}
+                onPress={saveBinEdit}
+              >
+                <Text style={[styles.modalBtnText, { color: colors.textInverse }]}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 };
@@ -343,4 +443,36 @@ const styles = StyleSheet.create({
   epcRemove: { padding: spacing.xs },
   epcRemoveText: { ...typography.bodySmall, fontWeight: '700' },
   footer: { marginTop: spacing.lg },
+  // Modal
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: spacing.xl,
+  },
+  modalContent: {
+    width: '100%',
+    borderRadius: borderRadius.lg,
+    padding: spacing.xl,
+    gap: spacing.lg,
+  },
+  modalTitle: { ...typography.h3, fontWeight: '700' },
+  modalInput: {
+    borderWidth: 1,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    ...typography.body,
+    fontFamily: 'monospace',
+  },
+  modalActions: { flexDirection: 'row', gap: spacing.md },
+  modalBtn: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  modalBtnText: { ...typography.body, fontWeight: '600' },
 });

@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import { Order } from '../models/Order'
 import { IntegrationMapping } from '../models/IntegrationMapping'
 import { ImportJob } from '../models/ImportJob'
+import { MasterConfig } from '../models/MasterConfig'
 import { parseFile } from '../services/fileParserService'
 
 const ALLOWED_STATUSES = ['pending', 'scanned', 'processed']
@@ -15,23 +16,29 @@ const SAP_STATUS_MAP: Record<string, string> = {
   '': 'pending',
 }
 
-const BIZSTEP_MAP: Record<string, string> = {
-  Y214: 'urn:epcglobal:cbv:bizstep:picking',
-  Y220: 'urn:epcglobal:cbv:bizstep:packing',
-  Y230: 'urn:epcglobal:cbv:bizstep:shipping',
-  Y100: 'urn:epcglobal:cbv:bizstep:receiving',
+// Maps the standardised action names (stored in MasterConfig) to EPCIS bizStep URIs.
+const ACTION_TO_BIZSTEP: Record<string, string> = {
+  picking: 'urn:epcglobal:cbv:bizstep:picking',
+  packing: 'urn:epcglobal:cbv:bizstep:packing',
+  commissioning: 'urn:epcglobal:cbv:bizstep:commissioning',
+  decommissioning: 'urn:epcglobal:cbv:bizstep:decommissioning',
+  shipping: 'urn:epcglobal:cbv:bizstep:shipping',
+  receiving: 'urn:epcglobal:cbv:bizstep:receiving',
 }
 const DEFAULT_BIZSTEP = 'urn:epcglobal:cbv:bizstep:picking'
 
 // ─── UI MappingConfig keys → internal Order field names ──────────────────────
-// The admin portal sends { orderNumber, materialBatch, sourceBin, quantity }
-// where each value is the source field name in the uploaded file.
 const UI_KEY_TO_FIELD: Record<string, string> = {
   orderNumber: 'orderNum',
   material: 'material',
   batch: 'batch',
   sourceBin: 'bin',
   quantity: 'qty',
+  destinationBin: 'destinationBin',
+  warehouse: 'warehouse',
+  deliveryRef: 'deliveryRef',
+  processType: 'processType',
+  confirmedAt: 'confirmedAt',
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,9 +99,11 @@ export const importOrders = async (req: Request, res: Response) => {
   let fieldMappings: Array<{ sourceField: string; targetField: string }> = []
   let arrayRootPath: string | undefined
 
+  let defaultValues: Record<string, string> = {}
+
   if (req.body.mapping) {
     // Inline mapping sent by the UI as a JSON string
-    let uiMapping: Record<string, string>
+    let uiMapping: Record<string, unknown>
     try {
       uiMapping = JSON.parse(req.body.mapping as string)
     } catch {
@@ -106,10 +115,14 @@ export const importOrders = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'mapping.orderNumber is required' })
     }
 
+    if (uiMapping.defaultValues && typeof uiMapping.defaultValues === 'object') {
+      defaultValues = uiMapping.defaultValues as Record<string, string>
+    }
+
     fieldMappings = Object.entries(uiMapping)
-      .filter(([uiKey]) => UI_KEY_TO_FIELD[uiKey])
+      .filter(([uiKey]) => UI_KEY_TO_FIELD[uiKey] && typeof uiMapping[uiKey] === 'string')
       .map(([uiKey, sourceField]) => ({
-        sourceField,
+        sourceField: sourceField as string,
         targetField: UI_KEY_TO_FIELD[uiKey]!,
       }))
   } else {
@@ -127,7 +140,12 @@ export const importOrders = async (req: Request, res: Response) => {
 
     fieldMappings = savedMapping.fieldMappings
     arrayRootPath = savedMapping.arrayRootPath
+    defaultValues = savedMapping.defaultValues ?? {}
   }
+
+  // Fetch master config once for the whole import batch
+  const masterConfig = await MasterConfig.findOne({ tenantId: tenant._id })
+  const operationalKeys = masterConfig?.operationalKeys ?? []
 
   // Create job record immediately so we can return jobId right away
   const job = await ImportJob.create({
@@ -140,6 +158,8 @@ export const importOrders = async (req: Request, res: Response) => {
   try {
     const records = await parseFile(req.file.buffer, req.file.mimetype, arrayRootPath)
 
+    const operationalKeyWarnings: string[] = []
+
     const ordersToCreate = records.map((record) => {
       const order: Record<string, unknown> = {
         tenantId: tenant._id,
@@ -148,7 +168,7 @@ export const importOrders = async (req: Request, res: Response) => {
       }
 
       for (const { sourceField, targetField } of fieldMappings) {
-        const rawValue = record[sourceField]
+        const rawValue = record[sourceField] ?? defaultValues[targetField] ?? null
         if (rawValue === undefined || rawValue === null) continue
 
         if (targetField === 'status') {
@@ -159,6 +179,18 @@ export const importOrders = async (req: Request, res: Response) => {
           order[targetField] = new Date(String(rawValue))
         } else {
           order[targetField] = String(rawValue)
+        }
+
+        // Validate operational key values against master config
+        const opKey = operationalKeys.find(k => k.fieldName === targetField)
+        if (opKey && rawValue !== null && rawValue !== undefined) {
+          const hasMapping = opKey.valueMappings.some(vm => vm.sourceValue === String(rawValue))
+          if (!hasMapping) {
+            const warning = `No master config mapping for ${targetField}="${rawValue}"`
+            if (!operationalKeyWarnings.includes(warning)) {
+              operationalKeyWarnings.push(warning)
+            }
+          }
         }
       }
 
@@ -178,6 +210,7 @@ export const importOrders = async (req: Request, res: Response) => {
       status: 'done',
       rowCount: ordersToCreate.length,
       filename: req.file.originalname,
+      ...(operationalKeyWarnings.length > 0 ? { warnings: operationalKeyWarnings } : {}),
     })
   } catch (error) {
     await ImportJob.findByIdAndUpdate(job._id, {
@@ -237,11 +270,21 @@ export const exportOrders = async (req: Request, res: Response) => {
   const tenant = req.tenant!
 
   try {
-    const orders = await Order.find({ tenantId: tenant._id })
+    const [orders, masterConfig] = await Promise.all([
+      Order.find({ tenantId: tenant._id }),
+      MasterConfig.findOne({ tenantId: tenant._id }),
+    ])
+
+    const processTypeKey = masterConfig?.operationalKeys.find(k => k.fieldName === 'processType')
 
     const events = orders.map((order) => {
       const eventTime = (order.confirmedAt ?? order.createdAt).toISOString()
-      const bizStep = BIZSTEP_MAP[order.processType ?? ''] ?? DEFAULT_BIZSTEP
+
+      let bizStep = DEFAULT_BIZSTEP
+      if (order.processType && processTypeKey) {
+        const vm = processTypeKey.valueMappings.find(m => m.sourceValue === order.processType)
+        if (vm) bizStep = ACTION_TO_BIZSTEP[vm.action] ?? DEFAULT_BIZSTEP
+      }
       const readPointId = order.warehouse && order.bin
         ? `urn:epc:id:sgln:${order.warehouse}.00000.${order.bin}`
         : `urn:epc:id:sgln:unknown.00000.${order.bin ?? 'unknown'}`
@@ -290,7 +333,7 @@ ${events.join('\n')}
 
 export const createIntegrationMapping = async (req: Request, res: Response) => {
   const tenant = req.tenant!
-  const { name, sourceFormat, arrayRootPath, fieldMappings } = req.body
+  const { name, sourceFormat, arrayRootPath, fieldMappings, defaultValues } = req.body
 
   if (!name || !sourceFormat || !Array.isArray(fieldMappings) || fieldMappings.length === 0) {
     return res.status(400).json({
@@ -309,6 +352,7 @@ export const createIntegrationMapping = async (req: Request, res: Response) => {
       sourceFormat,
       arrayRootPath,
       fieldMappings,
+      ...(defaultValues ? { defaultValues } : {}),
     })
     res.status(201).json(mapping)
   } catch (error) {

@@ -12,6 +12,7 @@ import { IntegrationPage } from '@/pages/integration/IntegrationPage'
 import { OrdersPage } from '@/pages/orders/OrdersPage'
 import { UsersPage } from '@/pages/users/UsersPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
+import { MasterConfigPage } from '@/pages/settings/MasterConfigPage'
 
 function ProtectedRoutes() {
   const { isAuthenticated, user } = useAuth()
@@ -29,6 +30,10 @@ function ProtectedRoutes() {
         <Route path="/integration" element={<IntegrationPage />} />
         <Route path="/orders" element={<OrdersPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route
+          path="/master-config"
+          element={isAdmin ? <MasterConfigPage /> : <Navigate to="/dashboard" replace />}
+        />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </AppShell>
