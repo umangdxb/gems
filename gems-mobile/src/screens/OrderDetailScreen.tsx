@@ -33,7 +33,8 @@ type Props = {
 
 type ScanMode =
   | { type: 'epc'; lineNumber: string }
-  | { type: 'bin'; lineNumber: string };
+  | { type: 'src-bin'; lineNumber: string }
+  | { type: 'dest-bin'; lineNumber: string };
 
 export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const { orderId } = route.params;
@@ -46,14 +47,15 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // scannedEpcs: per-item local accumulator (keyed by lineNumber)
   const [scannedEpcs, setScannedEpcs] = useState<Record<string, string[]>>({});
-  // overriddenBins: per-item source bin overrides (keyed by lineNumber)
+  // per-item bin overrides (keyed by lineNumber)
   const [overriddenBins, setOverriddenBins] = useState<Record<string, string>>({});
+  const [overriddenDestBins, setOverriddenDestBins] = useState<Record<string, string>>({});
 
   // unified scan mode — null when scanner is closed
   const [scanMode, setScanMode] = useState<ScanMode | null>(null);
 
-  // bin text edit modal
-  const [editingBin, setEditingBin] = useState<{ lineNumber: string; value: string } | null>(null);
+  // bin text edit modal — tracks which bin type is being edited
+  const [editingBin, setEditingBin] = useState<{ lineNumber: string; binType: 'src-bin' | 'dest-bin'; value: string } | null>(null);
 
   useEffect(() => {
     fetchOrder();
@@ -84,9 +86,15 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   function handleScan(rawData: string) {
     if (!scanMode) return;
 
-    if (scanMode.type === 'bin') {
+    if (scanMode.type === 'src-bin') {
       setOverriddenBins(prev => ({ ...prev, [scanMode.lineNumber]: rawData }));
-      setScanMode(null); // one scan is enough for a bin
+      setScanMode(null);
+      return;
+    }
+
+    if (scanMode.type === 'dest-bin') {
+      setOverriddenDestBins(prev => ({ ...prev, [scanMode.lineNumber]: rawData }));
+      setScanMode(null);
       return;
     }
 
@@ -111,26 +119,31 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   }
 
   // ── Bin edit helpers ──────────────────────────────────────────────────────
-  function openBinEdit(item: OrderItem) {
-    setEditingBin({
-      lineNumber: item.lineNumber,
-      value: overriddenBins[item.lineNumber] ?? item.sourceBin ?? '',
-    });
+  function openBinEdit(item: OrderItem, binType: 'src-bin' | 'dest-bin') {
+    const currentValue =
+      binType === 'src-bin'
+        ? (overriddenBins[item.lineNumber] ?? item.sourceBin ?? '')
+        : (overriddenDestBins[item.lineNumber] ?? item.destinationBin ?? '');
+    setEditingBin({ lineNumber: item.lineNumber, binType, value: currentValue });
   }
 
   function saveBinEdit() {
     if (!editingBin) return;
     if (editingBin.value.trim()) {
-      setOverriddenBins(prev => ({ ...prev, [editingBin.lineNumber]: editingBin.value.trim() }));
+      if (editingBin.binType === 'src-bin') {
+        setOverriddenBins(prev => ({ ...prev, [editingBin.lineNumber]: editingBin.value.trim() }));
+      } else {
+        setOverriddenDestBins(prev => ({ ...prev, [editingBin.lineNumber]: editingBin.value.trim() }));
+      }
     }
     setEditingBin(null);
   }
 
   function switchToScan() {
     if (!editingBin) return;
-    const lineNumber = editingBin.lineNumber;
+    const { lineNumber, binType } = editingBin;
     setEditingBin(null);
-    setScanMode({ type: 'bin', lineNumber });
+    setScanMode({ type: binType, lineNumber });
   }
 
   // ── Completion ────────────────────────────────────────────────────────────
@@ -159,9 +172,8 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       const items = order.items.map(item => ({
         lineNumber: item.lineNumber,
         scannedEpcs: scannedEpcs[item.lineNumber] ?? [],
-        ...(overriddenBins[item.lineNumber] !== undefined
-          ? { sourceBin: overriddenBins[item.lineNumber] }
-          : {}),
+        ...(overriddenBins[item.lineNumber] !== undefined ? { sourceBin: overriddenBins[item.lineNumber] } : {}),
+        ...(overriddenDestBins[item.lineNumber] !== undefined ? { destinationBin: overriddenDestBins[item.lineNumber] } : {}),
       }));
       const result = await api.post<{ id: string; status: string; epcisGeneratedAt: string }>(
         `/delivery-orders/${orderId}/complete`,
@@ -182,7 +194,9 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const renderItem = ({ item, index }: { item: OrderItem; index: number }) => {
     const epcs = scannedEpcs[item.lineNumber] ?? [];
     const sourceBin = overriddenBins[item.lineNumber] ?? item.sourceBin;
-    const binEdited = overriddenBins[item.lineNumber] !== undefined && overriddenBins[item.lineNumber] !== item.sourceBin;
+    const destBin = overriddenDestBins[item.lineNumber] ?? item.destinationBin;
+    const srcBinEdited = overriddenBins[item.lineNumber] !== undefined && overriddenBins[item.lineNumber] !== item.sourceBin;
+    const destBinEdited = overriddenDestBins[item.lineNumber] !== undefined && overriddenDestBins[item.lineNumber] !== item.destinationBin;
 
     return (
       <Card variant="outlined" style={styles.itemCard} key={item.lineNumber}>
@@ -219,13 +233,13 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           </View>
 
           {/* Source Bin — tappable */}
-          <TouchableOpacity style={styles.itemGridCell} onPress={() => openBinEdit(item)} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.itemGridCell} onPress={() => openBinEdit(item, 'src-bin')} activeOpacity={0.7}>
             <Text style={[styles.gridLabel, { color: colors.textTertiary }]}>Source Bin ✎</Text>
             <Text
               style={[
                 styles.gridValue,
-                { color: binEdited ? colors.primary : colors.textPrimary },
-                binEdited && { fontWeight: '700' },
+                { color: srcBinEdited ? colors.primary : colors.textPrimary },
+                srcBinEdited && { fontWeight: '700' },
               ]}
               numberOfLines={1}
             >
@@ -233,12 +247,20 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             </Text>
           </TouchableOpacity>
 
-          <View style={styles.itemGridCell}>
-            <Text style={[styles.gridLabel, { color: colors.textTertiary }]}>Dest</Text>
-            <Text style={[styles.gridValue, { color: colors.textPrimary }]} numberOfLines={1}>
-              {item.destinationBin || '—'}
+          {/* Destination Bin — tappable */}
+          <TouchableOpacity style={styles.itemGridCell} onPress={() => openBinEdit(item, 'dest-bin')} activeOpacity={0.7}>
+            <Text style={[styles.gridLabel, { color: colors.textTertiary }]}>Dest Bin ✎</Text>
+            <Text
+              style={[
+                styles.gridValue,
+                { color: destBinEdited ? colors.primary : colors.textPrimary },
+                destBinEdited && { fontWeight: '700' },
+              ]}
+              numberOfLines={1}
+            >
+              {destBin || '—'}
             </Text>
-          </View>
+          </TouchableOpacity>
           <View style={styles.itemGridCell}>
             <Text style={[styles.gridLabel, { color: colors.textTertiary }]}>Scanned</Text>
             <Text
@@ -338,13 +360,17 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         visible={scanMode !== null}
         onClose={() => setScanMode(null)}
         onScan={handleScan}
-        title={scanMode?.type === 'bin' ? 'Scan Source Bin' : 'Scan EPC'}
+        title={
+          scanMode?.type === 'src-bin' ? 'Scan Source Bin'
+          : scanMode?.type === 'dest-bin' ? 'Scan Destination Bin'
+          : 'Scan EPC'
+        }
         instruction={
-          scanMode?.type === 'bin'
-            ? 'Scan the source storage bin barcode'
-            : scanMode
-            ? `Scanning for: ${order.items.find(i => i.lineNumber === scanMode.lineNumber)?.product ?? scanMode.lineNumber}`
-            : ''
+          scanMode?.type === 'src-bin' ? 'Scan the source storage bin barcode'
+          : scanMode?.type === 'dest-bin' ? 'Scan the destination storage bin barcode'
+          : scanMode
+          ? `Scanning for: ${order.items.find(i => i.lineNumber === scanMode.lineNumber)?.product ?? scanMode.lineNumber}`
+          : ''
         }
       />
 
@@ -353,7 +379,9 @@ export const OrderDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setEditingBin(null)} />
           <View style={[styles.modalContent, { backgroundColor: colors.backgroundLight }]}>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Edit Source Bin</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+              {editingBin?.binType === 'dest-bin' ? 'Edit Destination Bin' : 'Edit Source Bin'}
+            </Text>
             <TextInput
               style={[styles.modalInput, { color: colors.textPrimary, borderColor: colors.borderLight, backgroundColor: colors.backgroundDark }]}
               value={editingBin?.value ?? ''}

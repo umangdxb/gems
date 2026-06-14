@@ -253,7 +253,7 @@ export const completeDeliveryOrder = async (req: Request, res: Response) => {
   }
 
   // Apply scanned EPCs from request body
-  const scannedItems = req.body.items as Array<{ lineNumber: string; scannedEpcs: string[]; sourceBin?: string }> | undefined
+  const scannedItems = req.body.items as Array<{ lineNumber: string; scannedEpcs: string[]; sourceBin?: string; destinationBin?: string }> | undefined
   if (scannedItems && Array.isArray(scannedItems)) {
     for (const scanned of scannedItems) {
       const item = order.items.find(i => i.lineNumber === scanned.lineNumber)
@@ -261,6 +261,9 @@ export const completeDeliveryOrder = async (req: Request, res: Response) => {
         item.scannedEpcs = scanned.scannedEpcs ?? []
         if (scanned.sourceBin !== undefined && scanned.sourceBin !== '') {
           item.sourceBin = scanned.sourceBin
+        }
+        if (scanned.destinationBin !== undefined && scanned.destinationBin !== '') {
+          item.destinationBin = scanned.destinationBin
         }
       }
     }
